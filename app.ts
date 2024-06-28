@@ -1,5 +1,4 @@
 import { LogicalReplicationService, Wal2JsonPlugin } from 'pg-logical-replication';
-import Queue from 'queue';
 import * as pg from 'pg';
 
 const slotName = 'test_slot_wal2json';
@@ -12,8 +11,8 @@ const connection = {
   port: 5432,
 };
 
-const q = new Queue({ concurrency: 1, autostart: true });
 let stopping = false;
+let acked: string[] = [];
 
 const service = new LogicalReplicationService(
   /**
@@ -27,7 +26,7 @@ const service = new LogicalReplicationService(
    */
   {
     acknowledge: {
-      auto: true,
+      auto: false,
       timeoutSeconds: 10
     }
   }
@@ -60,13 +59,13 @@ async function addItem(table: string, id: string) {
 
 async function demoData() {
   await addItem('outbox', 'START');
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  // await new Promise((resolve) => setTimeout(resolve, 200));
 
   let i = 0;
   while (true) {
     await addItem('outbox', (++i).toString());
     await addItem('junk', (++i).toString());
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
 
@@ -85,18 +84,26 @@ async function complete() {
   service.stop()
 
   let i = 0;
-  while (!service.isStop() || q.length) {
+  while (!service.isStop()) {
     i = await exponentialBackoff(i);
   }
 
   process.exit(0);
 }
 
+service.on('acknowledge', (lsn: string) => {
+  if (acked.includes(lsn)) {
+    acked = acked.filter((a) => a !== lsn);
+  }
+
+  service.acknowledge(lsn);
+});
+
 /**
  * Wal2Json.Output
  * https://github.com/kibae/pg-logical-replication/blob/ts-main/src/output-plugins/wal2json/wal2json-plugin-output.type.ts
  */
-service.on('data', (lsn, log: any) => {
+service.on('data', async (lsn, log: any) => {
   // Do something what you want.
   const inserts = log.change.filter((change: any) => change.kind === 'insert')
 
@@ -104,11 +111,11 @@ service.on('data', (lsn, log: any) => {
     return;
   }
 
-  q.push(() => new Promise(async (resolve) => {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    console.log('Processed:', log.change);
-    resolve(null);
-  }));
+  await new Promise((resolve) => setTimeout(resolve, 10000));
+  console.log('Processed:', inserts);
+
+  acked.push(lsn);
+  console.log('Acknowledge:', lsn);
 
   if (new Date(log.timestamp).getTime() > Date.now() - 1000 * 60) {
     complete();

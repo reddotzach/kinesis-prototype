@@ -7,4 +7,4 @@ make setup
 ```
 
 ## Run
-`node app.js`
+`npm run start`
