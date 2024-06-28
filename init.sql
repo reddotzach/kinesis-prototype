@@ -8,3 +8,10 @@ CREATE TABLE outbox (
     aggregate_type TEXT NOT NULL,
     payload JSONB NOT NULL
 );
+
+CREATE TABLE junk (
+  id SERIAL PRIMARY KEY,
+  aggregate_id TEXT NOT NULL,
+  aggregate_type TEXT NOT NULL,
+  payload JSONB NOT NULL
+);
